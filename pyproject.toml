@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xgboost2ww"
+version = "0.1.0"
+description = "Compute WeightWatcher-style correlation matrices (W1/W2/W7/W8) for XGBoost via OOF margin increments."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {file = "LICENSE"}
+authors = [{name = "Charles Martin"}]
+keywords = ["xgboost", "weightwatcher", "spectral", "correlation", "matrix", "oof"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "numpy>=1.23",
+  "xgboost>=1.7",
+  "scikit-learn>=1.2",
+]
+
+[project.optional-dependencies]
+torch = ["torch>=2.0"]
+dev = ["pytest>=7.0", "build>=1.0", "ruff>=0.3.0"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
