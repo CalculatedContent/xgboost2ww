@@ -1,3 +1,42 @@
+## Why XGBoost2WW?
+
+**XGBoost2WW lets you apply WeightWatcher-style spectral diagnostics to XGBoost models.**
+
+XGBoost models don’t have traditional neural network weight matrices — so you can’t directly run tools like WeightWatcher on them.  
+XGBoost2WW bridges that gap by converting a trained XGBoost model into structured matrices (W1/W2/W7/W8) derived from **out-of-fold margin increments along the boosting trajectory**.
+
+These matrices behave like neural weight matrices, so you can analyze them with WeightWatcher.
+
+---
+
+## Why would a production ML engineer care?
+
+Because traditional metrics (accuracy, AUC, logloss) often look fine **right up until a model fails in production**.
+
+Spectral diagnostics can help detect:
+
+- Overfitting that standard validation doesn’t reveal  
+- Correlation traps in boosted trees  
+- Excessive memorization  
+- Unstable training dynamics  
+- Data leakage patterns  
+- Models that are brittle to distribution shift  
+
+In short:
+
+> XGBoost2WW gives you a structural diagnostic signal — not just a performance metric.
+
+That means you can:
+- Compare model candidates beyond accuracy
+- Detect problematic models *before deployment*
+- Monitor structural drift over time
+- Add an extra safety layer to your MLOps pipeline
+
+---
+
+If you deploy XGBoost models in production,  
+XGBoost2WW gives you a new lens to inspect them.
+
 # xgboost2ww
 
 Convert XGBoost boosting dynamics into WeightWatcher-style correlation matrices (W1/W2/W7/W8).
