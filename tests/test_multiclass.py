@@ -78,7 +78,7 @@ def test_multiclass_avg_shape(multiclass_setup):
 
 def test_multiclass_error_mode_raises(multiclass_setup):
     bst, X, y = multiclass_setup
-    with pytest.raises(ValueError, match="Detected multiclass labels"):
+    with pytest.raises(ValueError, match="Detected multiclass"):
         compute_matrices(bst, X, y, nfolds=3, t_points=12, random_state=0, multiclass="error")
 
 
@@ -104,3 +104,47 @@ def test_convert_per_class_torch_raises(multiclass_setup):
             multiclass="per_class",
             return_type="torch",
         )
+
+
+def test_multiclass_num_class_two_objective_shapes():
+    rng = np.random.default_rng(321)
+    n = 120
+    X = rng.standard_normal((n, 5), dtype=np.float32)
+    logits = X[:, 0] - 0.3 * X[:, 1] + 0.2 * X[:, 2]
+    y = (logits + 0.15 * rng.standard_normal(n) > 0).astype(np.int32)
+
+    dtrain = xgb.DMatrix(X, label=y)
+    params = {
+        "objective": "multi:softprob",
+        "num_class": 2,
+        "max_depth": 2,
+        "eta": 0.2,
+        "verbosity": 0,
+        "seed": 5,
+    }
+    bst = xgb.train(params, dtrain, num_boost_round=16)
+
+    mats_per_class = compute_matrices(
+        bst,
+        X,
+        y,
+        nfolds=3,
+        t_points=10,
+        random_state=0,
+        multiclass="per_class",
+    )
+    assert isinstance(mats_per_class, dict)
+    assert set(mats_per_class.keys()) == {0, 1}
+    for k in (0, 1):
+        assert mats_per_class[k].W1.shape == (n, len(mats_per_class[k].endpoints))
+
+    mats_stack = compute_matrices(
+        bst,
+        X,
+        y,
+        nfolds=3,
+        t_points=10,
+        random_state=0,
+        multiclass="stack",
+    )
+    assert mats_stack.W1.shape == (n * 2, len(mats_stack.endpoints))
