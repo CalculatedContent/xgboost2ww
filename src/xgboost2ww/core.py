@@ -89,7 +89,8 @@ def _softmax_rows(M: np.ndarray) -> np.ndarray:
     M = np.asarray(M, dtype=np.float32)
     shifted = M - M.max(axis=1, keepdims=True)
     expm = np.exp(shifted)
-    return expm / np.sum(expm, axis=1, keepdims=True)
+    den = np.sum(expm, axis=1, keepdims=True) + 1e-12
+    return expm / den
 
 
 def _stage_endpoints(num_rounds: int, t_points: int) -> np.ndarray:
@@ -98,10 +99,14 @@ def _stage_endpoints(num_rounds: int, t_points: int) -> np.ndarray:
 
 
 def _margins_over_time(
-    bst: "xgb.Booster", dX: "xgb.DMatrix", endpoints: np.ndarray, num_class: int
+    bst: "xgb.Booster",
+    dX: "xgb.DMatrix",
+    endpoints: np.ndarray,
+    num_class: int,
+    multiclass_output: bool,
 ) -> np.ndarray:
     nrows = dX.num_row()
-    if num_class <= 2:
+    if not multiclass_output:
         F = np.empty((nrows, len(endpoints)), dtype=np.float32)
     else:
         F = np.empty((nrows, len(endpoints), num_class), dtype=np.float32)
@@ -109,7 +114,7 @@ def _margins_over_time(
     for j, t in enumerate(endpoints):
         pred = bst.predict(dX, iteration_range=(0, int(t)), output_margin=True)
         pred = np.asarray(pred, dtype=np.float32)
-        if num_class <= 2:
+        if not multiclass_output:
             F[:, j] = pred.reshape(-1)
             continue
 
@@ -234,8 +239,10 @@ def _out_of_fold_increments(
     nfolds: int = 5,
     t_points: int = 160,
     random_state: int = 0,
+    train_params: dict | None = None,
+    num_boost_round: int | None = None,
     verbose: bool = False,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int, bool]:
     """Compute OOF margin increments and final margins."""
     if y.ndim != 1:
         y = y.reshape(-1)
@@ -255,26 +262,35 @@ def _out_of_fold_increments(
 
     K = int(classes.size)
 
-    num_rounds = _infer_num_rounds(model)
+    num_rounds = int(num_boost_round) if num_boost_round is not None else _infer_num_rounds(model)
     if num_rounds <= 0:
         raise ValueError("Could not infer num_boost_round from provided model.")
 
-    params = _infer_params(model)
+    params = dict(train_params) if train_params is not None else _infer_params(model)
+    objective = str(params.get("objective", ""))
+    num_class_param = int(params.get("num_class", K)) if params.get("num_class", K) is not None else K
+    multiclass_output = bool(objective in {"multi:softprob", "multi:softmax"} and num_class_param == 2)
+    if multiclass_output:
+        params["num_class"] = 2
+
     if K > 2:
         params["objective"] = params.get("objective") or "multi:softprob"
         if params["objective"] not in {"multi:softprob", "multi:softmax"}:
             params["objective"] = "multi:softprob"
         params["num_class"] = int(params.get("num_class", K))
+        multiclass_output = True
 
     endpoints = _stage_endpoints(num_rounds, t_points)
     T = len(endpoints)
 
-    if K <= 2:
+    output_classes = 2 if multiclass_output and K == 2 else K
+
+    if not multiclass_output:
         dF_oof = np.zeros((N, T), dtype=np.float32)
         m_final = np.zeros(N, dtype=np.float32)
     else:
-        dF_oof = np.zeros((N, T, K), dtype=np.float32)
-        m_final = np.zeros((N, K), dtype=np.float32)
+        dF_oof = np.zeros((N, T, output_classes), dtype=np.float32)
+        m_final = np.zeros((N, output_classes), dtype=np.float32)
 
     skf = StratifiedKFold(n_splits=nfolds, shuffle=True, random_state=random_state)
 
@@ -286,7 +302,9 @@ def _out_of_fold_increments(
 
         bst = xgb.train(params=params, dtrain=dtr, num_boost_round=num_rounds, verbose_eval=False)
 
-        Fva = _margins_over_time(bst, dva, endpoints, num_class=K)
+        Fva = _margins_over_time(
+            bst, dva, endpoints, num_class=output_classes, multiclass_output=multiclass_output
+        )
         dFva = np.empty_like(Fva)
         dFva[:, 0] = Fva[:, 0]
         dFva[:, 1:] = Fva[:, 1:] - Fva[:, :-1]
@@ -294,7 +312,7 @@ def _out_of_fold_increments(
         dF_oof[va_idx] = dFva
         m_final[va_idx] = Fva[:, -1]
 
-    return dF_oof, m_final, endpoints, K
+    return dF_oof, m_final, endpoints, output_classes, multiclass_output
 
 
 def _matrices_from_increments(
@@ -316,6 +334,8 @@ def compute_matrices(
     nfolds: int = 5,
     t_points: int = 160,
     random_state: int = 0,
+    train_params: dict | None = None,
+    num_boost_round: int | None = None,
     multiclass: Literal["error", "per_class", "stack", "avg"] = "error",
     verbose: bool = False,
 ) -> Union[Matrices, Dict[int, Matrices]]:
@@ -332,17 +352,25 @@ def compute_matrices(
     X = _as_numpy(data)
     y = _as_numpy(labels).astype(np.int32).reshape(-1)
 
-    dF_oof, m_final, endpoints, K = _out_of_fold_increments(
-        model, X, y, nfolds=nfolds, t_points=t_points, random_state=random_state, verbose=verbose
+    dF_oof, m_final, endpoints, K, multiclass_output = _out_of_fold_increments(
+        model,
+        X,
+        y,
+        nfolds=nfolds,
+        t_points=t_points,
+        random_state=random_state,
+        train_params=train_params,
+        num_boost_round=num_boost_round,
+        verbose=verbose,
     )
 
-    if K <= 2:
+    if not multiclass_output:
         W1, W2, W7, W8 = _matrices_from_increments(dF_oof, m_final, random_state=random_state)
         return Matrices(W1=W1, W2=W2, W7=W7, W8=W8, m_final=m_final.astype(np.float32), endpoints=endpoints)
 
     if multiclass == "error":
         raise ValueError(
-            "Detected multiclass labels (K > 2). Set multiclass to one of: 'per_class', 'stack', or 'avg'."
+            "Detected multiclass outputs. Set multiclass to one of: 'per_class', 'stack', or 'avg'."
         )
 
     p = _softmax_rows(m_final)
@@ -423,6 +451,8 @@ def convert(
     nfolds: int = 5,
     t_points: int = 160,
     random_state: int = 0,
+    train_params: dict | None = None,
+    num_boost_round: int | None = None,
     multiclass: Literal["error", "per_class", "stack", "avg"] = "error",
     return_type: Literal["numpy", "torch"] = "torch",
     verbose: bool = False,
@@ -435,6 +465,8 @@ def convert(
         nfolds=nfolds,
         t_points=t_points,
         random_state=random_state,
+        train_params=train_params,
+        num_boost_round=num_boost_round,
         multiclass=multiclass,
         verbose=verbose,
     )
