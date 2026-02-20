@@ -74,7 +74,7 @@ pip install weightwatcher
 
 ### Diagnostic Example
 -  Overly simple model where the training data is strongly overfit
-'XGBoost2WWDiagnosticExample.ipynb'
+`XGBoost2WWDiagnosticExample.ipynb`
 
 
 
