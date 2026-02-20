@@ -62,6 +62,12 @@ pip install weightwatcher
 
 ## Google Colab Notebooks
 
+### Simple Good Model
+
+- High test and training accuracy, good WW metrics
+`GoodModel.ipynb`
+
+
 ### Realistic End-to-End Example
 
 - Interpreting α and traps in a realistic, non-trivial setting
