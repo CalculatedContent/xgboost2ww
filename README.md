@@ -72,6 +72,10 @@ pip install weightwatcher
 - Trains 100 random models, analyzes weightwatcher alpha vs test accuracy
 `GoodModelsXGBoost2WW.ipynb`
 
+### Poorly Trained Credit Model
+-  Small data set, hard to get high test accuracy, shows high alpha
+`PoorlyTrainedCreditModel.ipynb`
+
 ### Diagnostic Example
 -  Overly simple model where the training data is strongly overfit
 `XGBoost2WWDiagnosticExample.ipynb`
