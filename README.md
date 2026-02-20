@@ -69,7 +69,7 @@ pip install weightwatcher
 
 ### Stress Test Across 100 Random Models
 
-- Analyzes spectral statistics across many runs
+- Trains 100 random models, analyzes weightwatcher alpha vs test accuracy
 `GoodModelsXGBoost2WW.ipynb`
 
 ### Diagnostic Example
