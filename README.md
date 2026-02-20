@@ -57,6 +57,44 @@ pip install xgboost2ww
 pip install weightwatcher
 ```
 
+
+---
+
+## Google Colab Notebooks
+
+### Realistic End-to-End Example
+
+See:
+
+`XGBoost2WWAdultIncomeExample.ipynb`
+
+This notebook demonstrates:
+
+- Training a single XGBoost model on the Adult Income dataset
+- Using a true holdout test split (no leakage)
+- Converting the trained model into the W7 matrix
+- Running WeightWatcher diagnostics
+- Interpreting α and traps in a realistic, non-trivial setting
+
+This is the recommended starting point if you want to understand how to apply the theory in practice.
+
+---
+
+### Stress Test Across 100 Random Models
+
+See:
+
+`GoodModelsXGBoost2WW.ipynb`
+
+This notebook:
+
+- Trains 100 randomly configured XGBoost models
+- Filters for models that generalize well
+- Converts each into W7
+- Analyzes spectral statistics across many runs
+
+This notebook stress-tests the theory and explores how α behaves across diverse boosting regimes.
+
 ## Quickstart (compute_matrices)
 
 ```python
