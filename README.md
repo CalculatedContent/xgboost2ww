@@ -62,10 +62,10 @@ pip install weightwatcher
 
 ## Google Colab Notebooks
 
-### Simple Good Model
+### Single Good Model
 
 - High test and training accuracy, good WW metrics
-`GoodModel.ipynb`
+`SingleGoodModelWWXGBoost2WW.ipynb`
 
 
 ### Realistic End-to-End Example
