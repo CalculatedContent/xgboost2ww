@@ -50,7 +50,7 @@ pip install -e .
 pip install weightwatcher torch
 ```
 
-Minimal runtime install (for a future PyPI install):
+Minimal runtime install:
 
 ```bash
 pip install xgboost2ww

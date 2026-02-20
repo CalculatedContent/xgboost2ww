@@ -9,7 +9,7 @@ description = "Compute WeightWatcher-style correlation matrices (W1/W2/W7/W8) fo
 readme = "README.md"
 requires-python = ">=3.9"
 license = {file = "LICENSE"}
-authors = [{name = "Charles Martin"}]
+authors = [{name = "Charles H. Martin, PhD"}]
 keywords = ["xgboost", "weightwatcher", "spectral", "correlation", "matrix", "oof"]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -34,3 +34,8 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 100
+
+[project.urls]
+Homepage = "https://github.com/CalculatedContent/xgboost2ww"
+Repository = "https://github.com/CalculatedContent/xgboost2ww"
+Issues = "https://github.com/CalculatedContent/xgboost2ww/issues"
