@@ -166,8 +166,6 @@ print({"alpha": alpha, "rand_num_spikes": rand_num_spikes})
 
 For initial evaluation, you do not need `detX=True`. If you want determinant-based diagnostics, you can pass `detX=True`.
 
-## Good XGBoost Models
-![Good XGBoost Model](assets/xgb.png)
 
 ## Notes / limitations
 
