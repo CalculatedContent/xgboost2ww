@@ -179,7 +179,7 @@ Below is an example of a WeightWatcher spectral analysis applied to an XGBoost m
 In this example:
 - (Left) The power-law fit produces an α value near 2
 - (Right) The ERG detX condition is pretty good (red and purple lines are close)
-- No significant traps are detected (not shown)
+- (not shown0 No significant traps are detected 
 
 But unlike many Neural Networksm the full empirical spectral density (ESD) shows very-heavy-tailed structure.  This indicates that the training data was very easy to memorize.  That's OK.  Even expected.
 
