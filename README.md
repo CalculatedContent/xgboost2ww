@@ -180,7 +180,7 @@ In this example:
 - The power-law fit produces an α value near 2  
 - No significant traps are detected
 
-But unlike mane Neural Networksm the full empirical spectral density (ESD) shows very-heavy-tailed structure.  This indicates that the training data was very easy to effectively memorize.  That's OK.  Even expected.
+But unlike many Neural Networksm the full empirical spectral density (ESD) shows very-heavy-tailed structure.  This indicates that the training data was very easy to memorize.  That's OK.  Even expected.
 
 This is what a structurally healthy model looks like.
 
