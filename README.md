@@ -62,27 +62,27 @@ pip install weightwatcher
 
 ## Google Colab Notebooks
 
-### Single Good Model
+#### Single Good Model
 
 - High test and training accuracy, good WW metrics
 `SingleGoodModelWWXGBoost2WW.ipynb`
 
 
-### Realistic End-to-End Example
+#### Realistic End-to-End Example
 
 - Interpreting α and traps in a realistic, non-trivial setting
 `XGBoost2WWAdultIncomeExample.ipynb`
 
-### Stress Test Across 100 Random Models
+#### Stress Test Across 100 Random Models
 
 - Trains 100 random models, analyzes weightwatcher alpha vs test accuracy
 `GoodModelsXGBoost2WW.ipynb`
 
-### Poorly Trained Credit Model
+#### Poorly Trained Credit Model
 -  Small data set, hard to get high test accuracy, shows high alpha
 `PoorlyTrainedCreditModel.ipynb`
 
-### Diagnostic Example
+#### Diagnostic Example
 -  Overly simple model where the training data is strongly overfit
 `XGBoost2WWDiagnosticExample.ipynb`
 
