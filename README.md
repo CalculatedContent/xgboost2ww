@@ -167,12 +167,6 @@ print({"alpha": alpha, "rand_num_spikes": rand_num_spikes})
 For initial evaluation, you do not need `detX=True`. If you want determinant-based diagnostics, you can pass `detX=True`.
 
 
-## Notes / limitations
-
-- Binary classification is the default workflow.
-- Multiclass requires setting `multiclass` explicitly (supported modes: `"per_class"`, `"stack"`, `"avg"`).
-- `convert(..., multiclass="per_class", return_type="torch")` is unsupported and raises; for multiclass per-class output, use `return_type="numpy"`.
-- `torch` is optional unless you need `convert(..., return_type="torch")`.
 
 ## What the Diagnostics Look Like
 
@@ -197,4 +191,12 @@ When α drifts upward or traps appear, it is often a signal of:
 - Memorization  
 - Instability in training  
 - Data leakage  
-- Structural brittleness  
+- Structural brittleness
+
+
+## Notes / limitations
+
+- Binary classification is the default workflow.
+- Multiclass requires setting `multiclass` explicitly (supported modes: `"per_class"`, `"stack"`, `"avg"`).
+- `convert(..., multiclass="per_class", return_type="torch")` is unsupported and raises; for multiclass per-class output, use `return_type="numpy"`.
+- `torch` is optional unless you need `convert(..., return_type="torch")`.
