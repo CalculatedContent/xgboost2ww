@@ -179,7 +179,7 @@ For initial evaluation, you do not need `detX=True`. If you want determinant-bas
 Below is an example of a WeightWatcher spectral analysis applied to an XGBoost model via **xgboost2ww**.
 
 <p align="center">
-  <img src="assets/xgb.png" width="750">
+  <img src="assets/good_xgboost_models.png" width="750">
 </p>
 
 In this example:
