@@ -177,10 +177,10 @@ Below is an example of a WeightWatcher spectral analysis applied to an XGBoost m
 </p>
 
 In this example:
-
-- The empirical spectral density (ESD) shows heavy-tailed structure  
 - The power-law fit produces an α value near 2  
-- No significant traps are detected  
+- No significant traps are detected
+
+But unlike mane Neural Networksm the full empirical spectral density (ESD) shows very-heavy-tailed structure.  This indicates that the training data was very easy to effectively memorize.  That's OK.  Even expected.
 
 This is what a structurally healthy model looks like.
 
