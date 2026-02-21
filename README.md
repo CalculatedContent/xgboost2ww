@@ -173,3 +173,28 @@ For initial evaluation, you do not need `detX=True`. If you want determinant-bas
 - Multiclass requires setting `multiclass` explicitly (supported modes: `"per_class"`, `"stack"`, `"avg"`).
 - `convert(..., multiclass="per_class", return_type="torch")` is unsupported and raises; for multiclass per-class output, use `return_type="numpy"`.
 - `torch` is optional unless you need `convert(..., return_type="torch")`.
+
+## What the Diagnostics Look Like
+
+Below is an example of a WeightWatcher spectral analysis applied to an XGBoost model via **xgboost2ww**.
+
+<p align="center">
+  <img src="assets/xgb.png" width="750">
+</p>
+
+In this example:
+
+- The empirical spectral density (ESD) shows heavy-tailed structure  
+- The power-law fit produces an α value near 2  
+- No significant traps are detected  
+
+This is what a structurally healthy model looks like.
+
+When α drifts upward or traps appear, it is often a signal of:
+
+- Overfitting  
+- Correlation traps  
+- Memorization  
+- Instability in training  
+- Data leakage  
+- Structural brittleness  
