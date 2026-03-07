@@ -543,6 +543,10 @@ def convert(
     verbose: bool = False,
 ):
     """Compute matrices and return either the selected numpy matrix or a torch layer."""
+    supported = ("W1", "W2", "W7", "W8", "W9")
+    if W not in supported:
+        raise ValueError(f"W must be one of {supported}; got {W!r}.")
+
     mats = compute_matrices(
         model,
         data,
@@ -559,7 +563,25 @@ def convert(
     if multiclass == "per_class":
         if return_type == "torch":
             raise ValueError("convert(..., multiclass='per_class', return_type='torch') is unsupported; use return_type='numpy'.")
-        return {k: getattr(v, W) for k, v in mats.items()}
+        out: Dict[int, np.ndarray] = {}
+        for k, v in mats.items():
+            if not hasattr(v, W):
+                available = tuple(name for name in supported if hasattr(v, name))
+                raise AttributeError(
+                    f"Requested matrix {W!r} is unavailable on class {k}. "
+                    f"This environment exposes {available}. "
+                    "If you expected W9, upgrade/reinstall xgboost2ww from a revision that includes W9."
+                )
+            out[k] = getattr(v, W)
+        return out
+
+    if not hasattr(mats, W):
+        available = tuple(name for name in supported if hasattr(mats, name))
+        raise AttributeError(
+            f"Requested matrix {W!r} is unavailable on Matrices. "
+            f"This environment exposes {available}. "
+            "If you expected W9, upgrade/reinstall xgboost2ww from a revision that includes W9."
+        )
 
     Wmat = getattr(mats, W)
     if return_type == "numpy":
