@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -6,6 +7,7 @@ import xgboost as xgb
 
 from xgboost2ww import compute_matrices, convert
 from xgboost2ww.core import _infer_params, _out_of_fold_increments
+import xgboost2ww.core as core_mod
 
 
 
@@ -56,6 +58,22 @@ def test_convert_w9_numpy_and_torch(booster, toy_binary_data):
     torch = pytest.importorskip("torch")
     layer = convert(booster, X, y, W="W9", return_type="torch", nfolds=3, t_points=16, random_state=0)
     assert isinstance(layer, torch.nn.Sequential)
+
+
+def test_convert_reports_missing_requested_matrix(monkeypatch, booster, toy_binary_data):
+    X, y = toy_binary_data
+
+    fake = SimpleNamespace(
+        W1=np.zeros((X.shape[0], 3), dtype=np.float32),
+        W2=np.zeros((X.shape[0], 3), dtype=np.float32),
+        W7=np.zeros((X.shape[0], 3), dtype=np.float32),
+        W8=np.zeros((X.shape[0], 3), dtype=np.float32),
+    )
+
+    monkeypatch.setattr(core_mod, "compute_matrices", lambda *args, **kwargs: fake)
+
+    with pytest.raises(AttributeError, match="expected W9, upgrade/reinstall xgboost2ww"):
+        convert(booster, X, y, W="W9", return_type="numpy")
 
 
 def test_w9_formula_reconstruction_binary(booster, toy_binary_data):
