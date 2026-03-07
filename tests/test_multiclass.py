@@ -45,12 +45,14 @@ def test_multiclass_per_class_shapes(multiclass_setup):
         assert m.W2.shape == m.W1.shape
         assert m.W7.shape == m.W1.shape
         assert m.W8.shape == m.W1.shape
+        assert m.W9.shape == m.W1.shape
         assert m.m_final.shape == (X.shape[0],)
         assert m.W1.dtype == np.float32
         assert np.all(np.isfinite(m.W1))
         assert np.all(np.isfinite(m.W2))
         assert np.all(np.isfinite(m.W7))
         assert np.all(np.isfinite(m.W8))
+        assert np.all(np.isfinite(m.W9))
 
 
 def test_multiclass_stack_shape(multiclass_setup):
@@ -62,6 +64,7 @@ def test_multiclass_stack_shape(multiclass_setup):
     assert mats.W2.shape == mats.W1.shape
     assert mats.W7.shape == mats.W1.shape
     assert mats.W8.shape == mats.W1.shape
+    assert mats.W9.shape == mats.W1.shape
     assert mats.m_final.shape == (X.shape[0], 3)
 
 
@@ -73,6 +76,7 @@ def test_multiclass_avg_shape(multiclass_setup):
     assert mats.W2.shape == mats.W1.shape
     assert mats.W7.shape == mats.W1.shape
     assert mats.W8.shape == mats.W1.shape
+    assert mats.W9.shape == mats.W1.shape
     assert mats.m_final.shape == (X.shape[0], 3)
 
 
@@ -137,6 +141,7 @@ def test_multiclass_num_class_two_objective_shapes():
     assert set(mats_per_class.keys()) == {0, 1}
     for k in (0, 1):
         assert mats_per_class[k].W1.shape == (n, len(mats_per_class[k].endpoints))
+        assert mats_per_class[k].W9.shape == mats_per_class[k].W1.shape
 
     mats_stack = compute_matrices(
         bst,
@@ -148,3 +153,4 @@ def test_multiclass_num_class_two_objective_shapes():
         multiclass="stack",
     )
     assert mats_stack.W1.shape == (n * 2, len(mats_stack.endpoints))
+    assert mats_stack.W9.shape == mats_stack.W1.shape
