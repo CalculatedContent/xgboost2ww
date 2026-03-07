@@ -1,7 +1,7 @@
 """xgboost2ww: compute WeightWatcher-style correlation matrices for XGBoost.
 
 This library computes the XGBoost "correlation" matrices we've been studying:
-W1, W2, W7, W8 derived from out-of-fold (OOF) margin increments along the
+W1, W2, W7, W8, W9 derived from out-of-fold (OOF) margin increments along the
 boosting trajectory.
 
 Public API:
@@ -48,6 +48,7 @@ class Matrices:
     W2: np.ndarray
     W7: np.ndarray
     W8: np.ndarray
+    W9: np.ndarray
     m_final: np.ndarray
     endpoints: np.ndarray
 
@@ -232,6 +233,67 @@ def _compute_W_matrices(
     return W1.astype(np.float32), W2.astype(np.float32), W7.astype(np.float32), W8.astype(np.float32)
 
 
+def _sum_tree_leaf_outputs_sq_from_json(tree_json: str) -> float:
+    tree = json.loads(tree_json)
+
+    def _walk(node: Mapping[str, Any]) -> float:
+        if "leaf" in node:
+            v = float(node["leaf"])
+            return v * v
+        total = 0.0
+        for child in node.get("children", []):
+            total += _walk(child)
+        return total
+
+    return _walk(tree)
+
+
+def _classwise_block_gamma_diag(
+    bst: "xgb.Booster",
+    endpoints: np.ndarray,
+    num_rounds: int,
+    output_classes: int,
+    reg_lambda: float,
+) -> np.ndarray:
+    """Compute blockwise stage regularizer mass using only L2 leaf penalty (lambda).
+
+    This is the W9 v1 local-quadratic approximation and intentionally ignores
+    the non-smooth L1 term (alpha).
+    """
+    dump_json = bst.get_dump(dump_format="json")
+    ntrees = len(dump_json)
+    if output_classes == 1:
+        expected = num_rounds
+        if ntrees != expected:
+            raise ValueError(f"Expected {expected} trees for binary model, got {ntrees}.")
+        leaf_mass = np.array([_sum_tree_leaf_outputs_sq_from_json(t) for t in dump_json], dtype=np.float64)
+        classwise = leaf_mass.reshape(1, num_rounds)
+    else:
+        expected = num_rounds * output_classes
+        if ntrees != expected:
+            raise ValueError(
+                f"Expected {expected} trees for multiclass model with {output_classes} classes, got {ntrees}."
+            )
+        leaf_mass = np.array([_sum_tree_leaf_outputs_sq_from_json(t) for t in dump_json], dtype=np.float64)
+        classwise = np.empty((output_classes, num_rounds), dtype=np.float64)
+        for k in range(output_classes):
+            classwise[k] = leaf_mass[k::output_classes]
+
+    block_start = np.concatenate(([0], endpoints[:-1]))
+    gamma = np.empty((output_classes, len(endpoints)), dtype=np.float64)
+    for j, (s, e) in enumerate(zip(block_start, endpoints)):
+        gamma[:, j] = reg_lambda * classwise[:, int(s) : int(e)].sum(axis=1)
+    return gamma
+
+
+def _compute_W9_from_raw_oof(dF_oof: np.ndarray, m_final: np.ndarray, gamma_diag: np.ndarray) -> np.ndarray:
+    p = _sigmoid(m_final)
+    h = np.clip(p * (1.0 - p), 1e-6, None).astype(np.float32)
+    A = _weighted_center_cols(dF_oof, h)
+    gamma_diag = np.clip(np.asarray(gamma_diag, dtype=np.float32), 1e-6, None)
+    return ((np.sqrt(h)[:, None] * A) / np.sqrt(gamma_diag)[None, :]).astype(np.float32)
+
+
 def _out_of_fold_increments(
     model: "xgb.Booster",
     X: np.ndarray,
@@ -242,7 +304,7 @@ def _out_of_fold_increments(
     train_params: dict | None = None,
     num_boost_round: int | None = None,
     verbose: bool = False,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int, bool]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int, bool, np.ndarray]:
     """Compute OOF margin increments and final margins."""
     if y.ndim != 1:
         y = y.reshape(-1)
@@ -283,14 +345,18 @@ def _out_of_fold_increments(
     endpoints = _stage_endpoints(num_rounds, t_points)
     T = len(endpoints)
 
-    output_classes = 2 if multiclass_output and K == 2 else K
+    output_classes = (2 if K == 2 else K) if multiclass_output else 1
 
     if not multiclass_output:
         dF_oof = np.zeros((N, T), dtype=np.float32)
         m_final = np.zeros(N, dtype=np.float32)
+        gamma_fold_weighted = np.zeros((1, T), dtype=np.float64)
     else:
         dF_oof = np.zeros((N, T, output_classes), dtype=np.float32)
         m_final = np.zeros((N, output_classes), dtype=np.float32)
+        gamma_fold_weighted = np.zeros((output_classes, T), dtype=np.float64)
+
+    reg_lambda = float(params.get("lambda", 1.0))
 
     skf = StratifiedKFold(n_splits=nfolds, shuffle=True, random_state=random_state)
 
@@ -312,7 +378,21 @@ def _out_of_fold_increments(
         dF_oof[va_idx] = dFva
         m_final[va_idx] = Fva[:, -1]
 
-    return dF_oof, m_final, endpoints, output_classes, multiclass_output
+        fold_gamma = _classwise_block_gamma_diag(
+            bst=bst,
+            endpoints=endpoints,
+            num_rounds=num_rounds,
+            output_classes=output_classes,
+            reg_lambda=reg_lambda,
+        )
+        gamma_fold_weighted += fold_gamma * (len(va_idx) / N)
+
+    if not multiclass_output:
+        gamma_diag_out = gamma_fold_weighted[0].astype(np.float32)
+    else:
+        gamma_diag_out = gamma_fold_weighted.astype(np.float32)
+
+    return dF_oof, m_final, endpoints, output_classes, multiclass_output, gamma_diag_out
 
 
 def _matrices_from_increments(
@@ -339,7 +419,7 @@ def compute_matrices(
     multiclass: Literal["error", "per_class", "stack", "avg"] = "error",
     verbose: bool = False,
 ) -> Union[Matrices, Dict[int, Matrices]]:
-    """Compute W1/W2/W7/W8 matrices for an XGBoost model using OOF margin increments.
+    """Compute W1/W2/W7/W8/W9 matrices for an XGBoost model using OOF margin increments.
 
     For multiclass labels (K > 2), set ``multiclass`` to one of:
       - "per_class": return ``Dict[int, Matrices]``
@@ -352,7 +432,7 @@ def compute_matrices(
     X = _as_numpy(data)
     y = _as_numpy(labels).astype(np.int32).reshape(-1)
 
-    dF_oof, m_final, endpoints, K, multiclass_output = _out_of_fold_increments(
+    dF_oof, m_final, endpoints, K, multiclass_output, gamma_diag = _out_of_fold_increments(
         model,
         X,
         y,
@@ -366,7 +446,8 @@ def compute_matrices(
 
     if not multiclass_output:
         W1, W2, W7, W8 = _matrices_from_increments(dF_oof, m_final, random_state=random_state)
-        return Matrices(W1=W1, W2=W2, W7=W7, W8=W8, m_final=m_final.astype(np.float32), endpoints=endpoints)
+        W9 = _compute_W9_from_raw_oof(dF_oof=dF_oof, m_final=m_final, gamma_diag=gamma_diag)
+        return Matrices(W1=W1, W2=W2, W7=W7, W8=W8, W9=W9, m_final=m_final.astype(np.float32), endpoints=endpoints)
 
     if multiclass == "error":
         raise ValueError(
@@ -391,12 +472,14 @@ def compute_matrices(
         sqrtwk = np.sqrt(wk).astype(np.float32)
         W7_wcent_k = _weighted_center_cols(W7k, wk)
         W8k = (sqrtwk[:, None] * W7_wcent_k).astype(np.float32)
+        W9k = _compute_W9_from_raw_oof(dF_oof=dFk, m_final=m_final[:, k], gamma_diag=gamma_diag[k])
 
         per_class[k] = Matrices(
             W1=W1k.astype(np.float32),
             W2=W2k.astype(np.float32),
             W7=W7k.astype(np.float32),
             W8=W8k.astype(np.float32),
+            W9=W9k.astype(np.float32),
             m_final=m_final[:, k].astype(np.float32),
             endpoints=endpoints,
         )
@@ -410,6 +493,7 @@ def compute_matrices(
             W2=np.vstack([per_class[k].W2 for k in range(K)]).astype(np.float32),
             W7=np.vstack([per_class[k].W7 for k in range(K)]).astype(np.float32),
             W8=np.vstack([per_class[k].W8 for k in range(K)]).astype(np.float32),
+            W9=np.vstack([per_class[k].W9 for k in range(K)]).astype(np.float32),
             m_final=m_final.astype(np.float32),
             endpoints=endpoints,
         )
@@ -420,6 +504,7 @@ def compute_matrices(
             W2=np.mean(np.stack([per_class[k].W2 for k in range(K)], axis=0), axis=0).astype(np.float32),
             W7=np.mean(np.stack([per_class[k].W7 for k in range(K)], axis=0), axis=0).astype(np.float32),
             W8=np.mean(np.stack([per_class[k].W8 for k in range(K)], axis=0), axis=0).astype(np.float32),
+            W9=np.mean(np.stack([per_class[k].W9 for k in range(K)], axis=0), axis=0).astype(np.float32),
             m_final=m_final.astype(np.float32),
             endpoints=endpoints,
         )
@@ -447,7 +532,7 @@ def convert(
     data: Any,
     labels: Any,
     *,
-    W: Literal["W1", "W2", "W7", "W8"] = "W7",
+    W: Literal["W1", "W2", "W7", "W8", "W9"] = "W7",
     nfolds: int = 5,
     t_points: int = 160,
     random_state: int = 0,

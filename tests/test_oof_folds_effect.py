@@ -9,7 +9,7 @@ def _mean_abs_diff(A: np.ndarray, B: np.ndarray) -> float:
     return float(np.mean(np.abs(A - B)))
 
 
-@pytest.mark.parametrize("name", ["W1", "W2", "W7", "W8"])
+@pytest.mark.parametrize("name", ["W1", "W2", "W7", "W8", "W9"])
 def test_changing_nfolds_changes_matrices(booster, toy_binary_data, name):
     """
     Strong evidence OOF folds are actually used:
@@ -29,7 +29,7 @@ def test_changing_nfolds_changes_matrices(booster, toy_binary_data, name):
     assert _mean_abs_diff(A, B) > 1e-5, f"{name} mean abs diff too small across nfolds"
 
 
-@pytest.mark.parametrize("name", ["W1", "W2", "W7", "W8"])
+@pytest.mark.parametrize("name", ["W1", "W2", "W7", "W8", "W9"])
 def test_changing_random_state_changes_matrices(booster, toy_binary_data, name):
     """
     Another strong OOF verification:

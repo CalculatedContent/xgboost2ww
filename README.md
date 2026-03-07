@@ -3,7 +3,7 @@
 **XGBoost2WW lets you apply WeightWatcher-style spectral diagnostics to XGBoost models.**
 
 XGBoost models don’t have traditional neural network weight matrices — so you can’t directly run tools like WeightWatcher on them.  
-XGBoost2WW bridges that gap by converting a trained XGBoost model into structured matrices (W1/W2/W7/W8) derived from **out-of-fold margin increments along the boosting trajectory**.
+XGBoost2WW bridges that gap by converting a trained XGBoost model into structured matrices (W1/W2/W7/W8/W9) derived from **out-of-fold margin increments along the boosting trajectory**.
 
 These matrices behave like neural weight matrices, so you can analyze them with WeightWatcher.
 
@@ -39,7 +39,7 @@ XGBoost2WW gives you a new lens to inspect them.
 
 # xgboost2ww
 
-Convert XGBoost boosting dynamics into WeightWatcher-style correlation matrices (W1/W2/W7/W8).
+Convert XGBoost boosting dynamics into WeightWatcher-style correlation matrices (W1/W2/W7/W8/W9).
 
 ## Install
 
@@ -132,8 +132,8 @@ mats = compute_matrices(
     num_boost_round=num_boost_round,
 )
 
-W7 = mats.W7
-print(W7.shape)
+W9 = mats.W9
+print(W9.shape)
 ```
 
 ## Quickstart (convert + WeightWatcher)
@@ -147,7 +147,7 @@ layer = convert(
     bst,
     X,
     y,
-    W="W7",
+    W="W9",
     return_type="torch",
     nfolds=5,
     t_points=40,
@@ -194,6 +194,25 @@ When α drifts upward or traps appear, it is often a signal of:
 - Data leakage  
 - Structural brittleness
 
+
+
+## Matrix definitions at a glance
+
+- **W8**: legacy practical surrogate based on weighted/centered `W7`.
+- **W9**: canonical regularizer-whitened Fisher OOF trajectory matrix.
+
+For binary classification, with raw OOF increments `dF_oof` and final OOF margin `m_final`:
+
+```text
+p = sigmoid(m_final)
+h = clip(p * (1 - p), eps, None)
+A = weighted_center_cols(dF_oof, h)
+gamma_diag[j] = lambda * sum_{trees in endpoint block j}(leaf_value^2)
+W9 = diag(sqrt(h)) · A · diag(gamma_diag^{-1/2})
+```
+
+`W9` v1 uses the local-quadratic **L2** regularizer mass (`lambda`) and intentionally
+ignores the non-smooth **L1** (`alpha`) term.
 
 ## Notes / limitations
 

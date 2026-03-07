@@ -3,6 +3,7 @@ import xgboost as xgb
 
 from xgboost2ww import compute_matrices
 
+
 def test_compute_matrices_shapes():
     rng = np.random.default_rng(0)
     X = rng.standard_normal((120, 6), dtype=np.float32)
@@ -18,4 +19,5 @@ def test_compute_matrices_shapes():
     assert mats.W2.shape == mats.W1.shape
     assert mats.W7.shape == mats.W1.shape
     assert mats.W8.shape == mats.W1.shape
+    assert mats.W9.shape == mats.W1.shape
     assert mats.m_final.shape == (120,)
