@@ -86,6 +86,10 @@ pip install weightwatcher
 -  Overly simple model where the training data is strongly overfit
 `XGBoost2WWDiagnosticExample.ipynb`
 
+#### SpamBase Alpha=2 Targeted Sweep
+- Targeted hyperparameter sweep to maximize validation accuracy near α≈2.0
+[`SpamBase_Hyperparameter_Sweep_Alpha2_Targeted.ipynb`](https://colab.research.google.com/github/CalculatedContent/xgboost2ww/blob/main/notebooks/SpamBase_Hyperparameter_Sweep_Alpha2_Targeted.ipynb)
+
 
 
 
