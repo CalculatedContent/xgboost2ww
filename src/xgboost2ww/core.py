@@ -1,30 +1,13 @@
-"""xgboost2ww: compute WeightWatcher-style correlation matrices for XGBoost.
-
-This library computes the XGBoost "correlation" matrices we've been studying:
-W1, W2, W7, W8, W9 derived from out-of-fold (OOF) margin increments along the
-boosting trajectory.
-
-Public API:
-  - compute_matrices(...)
-  - convert(...): optionally returns a torch.nn.Sequential with the chosen matrix
-  - to_linear_layer(...): build a torch Linear layer from a matrix
-
-Notes
------
-* The OOF procedure retrains models on each fold using the *same* training
-  parameters as the provided model (as best as we can infer).
-* Supports binary classification out-of-the-box.
-* Supports multiclass when compute_matrices(..., multiclass=...) is explicitly
-  provided as "per_class", "stack", or "avg".
-"""
+"""xgboost2ww core matrix construction."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Literal, Mapping, Tuple, Union
+from typing import Any, Dict, Iterable, Literal, Mapping, Optional, Tuple, Union
 
 import json
 import re
+import warnings
 
 import numpy as np
 
@@ -51,6 +34,15 @@ class Matrices:
     W9: np.ndarray
     m_final: np.ndarray
     endpoints: np.ndarray
+    W10: Optional[np.ndarray] = None
+    W10_info: Optional[Dict[str, Any]] = None
+
+
+@dataclass(frozen=True)
+class _BackendContext:
+    name: Literal["numpy", "torch"]
+    device: str
+    torch: Any = None
 
 
 def _as_numpy(X: Any) -> np.ndarray:
@@ -97,6 +89,78 @@ def _softmax_rows(M: np.ndarray) -> np.ndarray:
 def _stage_endpoints(num_rounds: int, t_points: int) -> np.ndarray:
     t_points = int(min(max(2, t_points), num_rounds))
     return np.unique(np.round(np.linspace(1, num_rounds, t_points)).astype(int))
+
+
+def _resolve_backend_context(backend: Literal["auto", "numpy", "torch"], device: str) -> _BackendContext:
+    if backend == "numpy":
+        return _BackendContext(name="numpy", device="cpu", torch=None)
+
+    torch_mod = None
+    try:
+        import torch as torch_mod  # type: ignore
+    except Exception:
+        if backend == "torch":
+            raise ImportError("backend='torch' requested but torch is not installed.")
+        return _BackendContext(name="numpy", device="cpu", torch=None)
+
+    req_device = device
+    if req_device == "auto":
+        if torch_mod.cuda.is_available():
+            req_device = "cuda"
+        elif getattr(torch_mod.backends, "mps", None) is not None and torch_mod.backends.mps.is_available():
+            req_device = "mps"
+        else:
+            req_device = "cpu"
+
+    if req_device == "cuda" and not torch_mod.cuda.is_available():
+        warnings.warn("Requested CUDA backend unavailable; falling back to CPU.")
+        req_device = "cpu"
+    if req_device == "mps":
+        mps_ok = getattr(torch_mod.backends, "mps", None) is not None and torch_mod.backends.mps.is_available()
+        if not mps_ok:
+            warnings.warn("Requested MPS backend unavailable; falling back to CPU.")
+            req_device = "cpu"
+
+    return _BackendContext(name="torch", device=req_device, torch=torch_mod)
+
+
+def _top_right_singular_vector_power(
+    A: np.ndarray,
+    backend_ctx: _BackendContext,
+    n_iter: int = 8,
+    tol: float = 1e-6,
+    random_state: int = 0,
+) -> np.ndarray:
+    rng = np.random.default_rng(random_state)
+    n_features = A.shape[1]
+    v = rng.standard_normal(n_features).astype(np.float64)
+    v = v / (np.linalg.norm(v) + 1e-12)
+
+    if backend_ctx.name == "torch" and backend_ctx.torch is not None:
+        torch = backend_ctx.torch
+        device = torch.device(backend_ctx.device)
+        At = torch.as_tensor(np.asarray(A, dtype=np.float32), device=device)
+        vt = torch.as_tensor(v.astype(np.float32), device=device)
+        for _ in range(n_iter):
+            v_prev = vt
+            u = At @ vt
+            u = u / (torch.linalg.norm(u) + 1e-12)
+            vt = At.T @ u
+            vt = vt / (torch.linalg.norm(vt) + 1e-12)
+            if torch.linalg.norm(vt - v_prev).item() < tol:
+                break
+        out = vt.detach().cpu().numpy().astype(np.float32)
+        return out / (np.linalg.norm(out) + 1e-12)
+
+    for _ in range(n_iter):
+        v_prev = v.copy()
+        u = A @ v
+        u = u / (np.linalg.norm(u) + 1e-12)
+        v = A.T @ u
+        v = v / (np.linalg.norm(v) + 1e-12)
+        if np.linalg.norm(v - v_prev) < tol:
+            break
+    return v.astype(np.float32)
 
 
 def _margins_over_time(
@@ -217,10 +281,8 @@ def _infer_params(model: "xgb.Booster") -> Dict[str, Any]:
 def _compute_W_matrices(
     W1_centered: np.ndarray, v_top: np.ndarray, m_oof_final: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Given centered W1, top right singular vector, and final margins, compute W1/W2/W7/W8."""
     W1 = W1_centered
     W2 = _row_center(W1)
-
     W7 = _center_cols(W1 - (W1 @ v_top)[:, None] * v_top[None, :])
 
     p = _sigmoid(m_oof_final)
@@ -255,11 +317,6 @@ def _classwise_block_gamma_diag(
     output_classes: int,
     reg_lambda: float,
 ) -> np.ndarray:
-    """Compute blockwise stage regularizer mass using only L2 leaf penalty (lambda).
-
-    This is the W9 v1 local-quadratic approximation and intentionally ignores
-    the non-smooth L1 term (alpha).
-    """
     dump_json = bst.get_dump(dump_format="json")
     ntrees = len(dump_json)
     if output_classes == 1:
@@ -305,7 +362,6 @@ def _out_of_fold_increments(
     num_boost_round: int | None = None,
     verbose: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int, bool, np.ndarray]:
-    """Compute OOF margin increments and final margins."""
     if y.ndim != 1:
         y = y.reshape(-1)
     N = X.shape[0]
@@ -396,14 +452,226 @@ def _out_of_fold_increments(
 
 
 def _matrices_from_increments(
-    dF: np.ndarray, m_final: np.ndarray, random_state: int
+    dF: np.ndarray,
+    m_final: np.ndarray,
+    random_state: int,
+    backend_ctx: Optional[_BackendContext] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     W1_centered = _center_cols(dF)
-    svd = TruncatedSVD(n_components=1, random_state=random_state)
-    svd.fit(W1_centered)
-    v_top = svd.components_[0].astype(np.float32)
-    v_top = v_top / (np.linalg.norm(v_top) + 1e-12)
+    if backend_ctx is not None and backend_ctx.name == "torch":
+        v_top = _top_right_singular_vector_power(W1_centered, backend_ctx, random_state=random_state)
+    else:
+        svd = TruncatedSVD(n_components=1, random_state=random_state)
+        svd.fit(W1_centered)
+        v_top = svd.components_[0].astype(np.float32)
+        v_top = v_top / (np.linalg.norm(v_top) + 1e-12)
     return _compute_W_matrices(W1_centered, v_top, m_final)
+
+
+def _infer_objective_for_w10(
+    model: "xgb.Booster",
+    objective: Optional[str] = None,
+    train_params: Optional[dict] = None,
+) -> str:
+    if objective is not None:
+        return str(objective)
+    if train_params is not None and train_params.get("objective") is not None:
+        return str(train_params["objective"])
+    params = _infer_params(model)
+    return str(params.get("objective", "binary:logistic"))
+
+
+def _compute_final_margin(model: "xgb.Booster", X: np.ndarray) -> np.ndarray:
+    dX = xgb.DMatrix(X)
+    pred = model.predict(dX, output_margin=True)
+    out = np.asarray(pred)
+    if out.ndim > 1:
+        if out.shape[1] != 1:
+            raise NotImplementedError("W10 currently supports binary logistic and squared-error regression only.")
+        out = out[:, 0]
+    return out.reshape(-1).astype(np.float64)
+
+
+def _compute_hessian_weights(m_final: np.ndarray, objective: str, eps: float = 1e-6) -> np.ndarray:
+    if objective == "binary:logistic":
+        p = 1.0 / (1.0 + np.exp(-m_final))
+        h = np.clip(p * (1.0 - p), eps, None)
+        return h.astype(np.float64)
+    if objective in {"reg:squarederror", "reg:linear"}:
+        return np.ones_like(m_final, dtype=np.float64)
+    if objective.startswith("multi:"):
+        raise NotImplementedError(
+            "W10 multiclass support is deferred: it requires classwise curvature and class-group leaf handling."
+        )
+    raise NotImplementedError(
+        f"W10 currently supports objective='binary:logistic' and 'reg:squarederror' only; got {objective!r}."
+    )
+
+
+def _predict_leaf_assignments(model: "xgb.Booster", X: np.ndarray) -> np.ndarray:
+    dX = xgb.DMatrix(X)
+    try:
+        leaves = model.predict(dX, pred_leaf=True, strict_shape=True)
+    except TypeError:
+        leaves = model.predict(dX, pred_leaf=True)
+    leaves = np.asarray(leaves)
+    if leaves.ndim == 1:
+        leaves = leaves.reshape(-1, 1)
+    if leaves.ndim > 2:
+        leaves = leaves.reshape(leaves.shape[0], -1)
+    return leaves.astype(np.int64)
+
+
+def _helmert_basis(L: int, dtype=np.float64) -> np.ndarray:
+    if L <= 1:
+        return np.zeros((L, 0), dtype=dtype)
+    Q = np.zeros((L, L - 1), dtype=dtype)
+    for j in range(1, L):
+        Q[:j, j - 1] = 1.0 / np.sqrt(j * (j + 1.0))
+        Q[j, j - 1] = -j / np.sqrt(j * (j + 1.0))
+    return Q
+
+
+def _remap_active_leaves(assignments: np.ndarray, weights: np.ndarray, support_tol: float):
+    uniq, inv = np.unique(assignments, return_inverse=True)
+    p = np.bincount(inv, weights=weights, minlength=uniq.size).astype(np.float64)
+    active_mask = p > support_tol
+    active_pos = np.flatnonzero(active_mask)
+    if active_pos.size <= 1:
+        return None
+    lut = np.full(uniq.size, -1, dtype=np.int64)
+    lut[active_pos] = np.arange(active_pos.size, dtype=np.int64)
+    remapped = lut[inv]
+    return remapped, p[active_pos], int(active_pos.size)
+
+
+def _build_w10_tree_block(
+    assignments: np.ndarray,
+    m: np.ndarray,
+    sqrtm: np.ndarray,
+    backend_ctx: _BackendContext,
+    eps: float,
+    eig_tol: float,
+    support_tol: float,
+) -> Tuple[Optional[np.ndarray], Dict[str, Any]]:
+    remap = _remap_active_leaves(assignments, m, support_tol=support_tol)
+    if remap is None:
+        return None, {"active_leaves": 0, "retained_rank": 0, "kept": False}
+    remapped, p_t, L_active = remap
+
+    Q = _helmert_basis(L_active, dtype=np.float64)
+    rows = Q[remapped]
+    mu_t = p_t @ Q
+
+    Rp = (Q * p_t[:, None]).T @ Q - np.outer(mu_t, mu_t)
+    if backend_ctx.name == "torch" and backend_ctx.torch is not None:
+        torch = backend_ctx.torch
+        try:
+            Rt = torch.as_tensor(Rp, dtype=torch.float64, device=backend_ctx.device)
+            evals_t, evecs_t = torch.linalg.eigh(Rt)
+            evals = evals_t.detach().cpu().numpy()
+            evecs = evecs_t.detach().cpu().numpy()
+        except Exception:
+            evals, evecs = np.linalg.eigh(Rp)
+    else:
+        evals, evecs = np.linalg.eigh(Rp)
+
+    keep = evals > eig_tol
+    if not np.any(keep):
+        return None, {"active_leaves": int(L_active), "retained_rank": 0, "kept": False}
+
+    inv_sqrt = evecs[:, keep] @ np.diag(1.0 / np.sqrt(np.maximum(evals[keep], eps)))
+    block = (rows - mu_t[None, :]) @ inv_sqrt
+    block = sqrtm[:, None] * block
+    block = block.astype(np.float32)
+    return block, {"active_leaves": int(L_active), "retained_rank": int(np.sum(keep)), "kept": True}
+
+
+def _concat_blocks(blocks: Iterable[np.ndarray], dtype: str = "float32") -> np.ndarray:
+    blocks = [b for b in blocks if b is not None and b.size > 0]
+    if not blocks:
+        return np.zeros((0, 0), dtype=np.dtype(dtype))
+    return np.concatenate(blocks, axis=1).astype(np.dtype(dtype), copy=False)
+
+
+def compute_w10(
+    model: "xgb.Booster",
+    data: Any,
+    labels: Any = None,
+    *,
+    objective: str | None = None,
+    backend: Literal["auto", "numpy", "torch"] = "auto",
+    device: Literal["auto", "cpu", "cuda", "mps"] = "auto",
+    dtype: Literal["float32", "float64"] = "float32",
+    eps: float = 1e-6,
+    eig_tol: float = 1e-8,
+    support_tol: float = 1e-12,
+    return_info: bool = False,
+    return_gram: bool = False,
+):
+    if not isinstance(model, xgb.Booster):
+        raise TypeError("model must be an xgboost.Booster")
+
+    X = _as_numpy(data)
+    N = X.shape[0]
+    backend_ctx = _resolve_backend_context(backend=backend, device=device)
+    objective_used = _infer_objective_for_w10(model=model, objective=objective)
+
+    m_final = _compute_final_margin(model, X)
+    h = _compute_hessian_weights(m_final, objective_used, eps=eps)
+    m = h / (np.sum(h) + 1e-24)
+    sqrtm = np.sqrt(m)
+
+    leaf_assign = _predict_leaf_assignments(model, X)
+    blocks = []
+    leaf_counts = []
+    contrast_ranks = []
+    skipped_trees = 0
+    for t in range(leaf_assign.shape[1]):
+        block, stats = _build_w10_tree_block(
+            leaf_assign[:, t], m=m, sqrtm=sqrtm, backend_ctx=backend_ctx, eps=eps, eig_tol=eig_tol, support_tol=support_tol
+        )
+        leaf_counts.append(stats["active_leaves"])
+        contrast_ranks.append(stats["retained_rank"])
+        if block is None:
+            skipped_trees += 1
+            continue
+        blocks.append(block)
+
+    W10 = _concat_blocks(blocks, dtype=dtype)
+    if W10.shape[0] == 0:
+        W10 = np.zeros((N, 0), dtype=np.dtype(dtype))
+
+    if not np.isfinite(W10).all():
+        raise FloatingPointError("W10 contains NaN or Inf values after stabilization.")
+
+    G10 = None
+    if return_gram:
+        G10 = (W10.T @ W10).astype(np.dtype(dtype), copy=False)
+
+    info = {
+        "objective": objective_used,
+        "backend": backend_ctx.name,
+        "device": backend_ctx.device,
+        "num_trees": int(leaf_assign.shape[1]),
+        "active_trees": int(leaf_assign.shape[1] - skipped_trees),
+        "skipped_trees": int(skipped_trees),
+        "per_tree_active_leaf_counts": leaf_counts,
+        "per_tree_retained_contrast_ranks": contrast_ranks,
+        "total_width": int(W10.shape[1]),
+        "computed_gram": bool(return_gram),
+        "tree_block_widths": [b.shape[1] for b in blocks],
+    }
+    if return_gram and return_info:
+        info["G10"] = G10
+
+    if return_info and return_gram:
+        return W10, info
+    if return_info:
+        return W10, info
+    if return_gram:
+        return W10, G10
+    return W10
 
 
 def compute_matrices(
@@ -417,15 +685,12 @@ def compute_matrices(
     train_params: dict | None = None,
     num_boost_round: int | None = None,
     multiclass: Literal["error", "per_class", "stack", "avg"] = "error",
+    include_W10: bool = False,
+    w10_backend: Literal["auto", "numpy", "torch"] = "auto",
+    w10_device: Literal["auto", "cpu", "cuda", "mps"] = "auto",
+    w10_return_gram: bool = False,
     verbose: bool = False,
 ) -> Union[Matrices, Dict[int, Matrices]]:
-    """Compute W1/W2/W7/W8/W9 matrices for an XGBoost model using OOF margin increments.
-
-    For multiclass labels (K > 2), set ``multiclass`` to one of:
-      - "per_class": return ``Dict[int, Matrices]``
-      - "stack": return one ``Matrices`` with class-wise matrices vertically stacked
-      - "avg": return one ``Matrices`` with class-wise matrices averaged
-    """
     if not isinstance(model, xgb.Booster):
         raise TypeError("model must be an xgboost.Booster")
 
@@ -444,10 +709,47 @@ def compute_matrices(
         verbose=verbose,
     )
 
+    sv_backend = _resolve_backend_context("auto", "auto")
+
     if not multiclass_output:
-        W1, W2, W7, W8 = _matrices_from_increments(dF_oof, m_final, random_state=random_state)
+        W1, W2, W7, W8 = _matrices_from_increments(dF_oof, m_final, random_state=random_state, backend_ctx=sv_backend)
         W9 = _compute_W9_from_raw_oof(dF_oof=dF_oof, m_final=m_final, gamma_diag=gamma_diag)
-        return Matrices(W1=W1, W2=W2, W7=W7, W8=W8, W9=W9, m_final=m_final.astype(np.float32), endpoints=endpoints)
+        W10 = None
+        W10_info = None
+        if include_W10:
+            if w10_return_gram:
+                W10, info = compute_w10(
+                    model,
+                    X,
+                    y,
+                    objective=(train_params or {}).get("objective") if train_params else None,
+                    backend=w10_backend,
+                    device=w10_device,
+                    return_info=True,
+                    return_gram=True,
+                )
+                W10_info = info
+            else:
+                W10, W10_info = compute_w10(
+                    model,
+                    X,
+                    y,
+                    objective=(train_params or {}).get("objective") if train_params else None,
+                    backend=w10_backend,
+                    device=w10_device,
+                    return_info=True,
+                )
+        return Matrices(
+            W1=W1,
+            W2=W2,
+            W7=W7,
+            W8=W8,
+            W9=W9,
+            m_final=m_final.astype(np.float32),
+            endpoints=endpoints,
+            W10=W10,
+            W10_info=W10_info,
+        )
 
     if multiclass == "error":
         raise ValueError(
@@ -458,15 +760,7 @@ def compute_matrices(
     per_class: Dict[int, Matrices] = {}
     for k in range(K):
         dFk = dF_oof[:, :, k]
-        W1k = _center_cols(dFk)
-        svd = TruncatedSVD(n_components=1, random_state=random_state)
-        svd.fit(W1k)
-        v_topk = svd.components_[0].astype(np.float32)
-        v_topk = v_topk / (np.linalg.norm(v_topk) + 1e-12)
-
-        W2k = _row_center(W1k)
-        W7k = _center_cols(W1k - (W1k @ v_topk)[:, None] * v_topk[None, :])
-
+        W1k, W2k, W7k, W8k = _matrices_from_increments(dFk, m_final[:, k], random_state=random_state, backend_ctx=sv_backend)
         wk = (p[:, k] * (1.0 - p[:, k])).astype(np.float32)
         wk = np.clip(wk, 1e-6, None)
         sqrtwk = np.sqrt(wk).astype(np.float32)
@@ -513,7 +807,6 @@ def compute_matrices(
 
 
 def to_linear_layer(W: np.ndarray):
-    """Build a torch.nn.Linear layer with weight=W and bias=False (torch is optional)."""
     try:
         import torch
     except Exception as e:  # pragma: no cover
@@ -532,7 +825,7 @@ def convert(
     data: Any,
     labels: Any,
     *,
-    W: Literal["W1", "W2", "W7", "W8", "W9"] = "W7",
+    W: Literal["W1", "W2", "W7", "W8", "W9", "W10"] = "W7",
     nfolds: int = 5,
     t_points: int = 160,
     random_state: int = 0,
@@ -542,10 +835,20 @@ def convert(
     return_type: Literal["numpy", "torch"] = "torch",
     verbose: bool = False,
 ):
-    """Compute matrices and return either the selected numpy matrix or a torch layer."""
-    supported = ("W1", "W2", "W7", "W8", "W9")
+    supported = ("W1", "W2", "W7", "W8", "W9", "W10")
     if W not in supported:
         raise ValueError(f"W must be one of {supported}; got {W!r}.")
+
+    if W == "W10":
+        Wmat = compute_w10(model, data, labels, objective=(train_params or {}).get("objective") if train_params else None)
+        if return_type == "numpy":
+            return Wmat
+        if return_type == "torch":
+            layer = to_linear_layer(Wmat)
+            import torch  # noqa: F401
+
+            return torch.nn.Sequential(layer)
+        raise ValueError("return_type must be 'numpy' or 'torch'")
 
     mats = compute_matrices(
         model,
