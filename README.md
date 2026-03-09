@@ -90,6 +90,10 @@ pip install weightwatcher
 - Targeted hyperparameter sweep to maximize validation accuracy near α≈2.0
 [`SpamBase_Hyperparameter_Sweep_Alpha2_Targeted.ipynb`](https://colab.research.google.com/github/CalculatedContent/xgboost2ww/blob/main/notebooks/SpamBase_Hyperparameter_Sweep_Alpha2_Targeted.ipynb)
 
+#### Random100 Long-Run Alpha Tracking
+- Long-running Random100 catalog training with Google Drive checkpoints and restart/resume support
+[`XGBWW_Catalog_Random100_XGBoost_Accuracy_LongRun_AlphaTracking.ipynb`](https://colab.research.google.com/github/CalculatedContent/xgboost2ww/blob/main/notebooks/XGBWW_Catalog_Random100_XGBoost_Accuracy_LongRun_AlphaTracking.ipynb)
+
 
 
 
