@@ -60,29 +60,6 @@ pip install weightwatcher
 
 ---
 
-
-## Troubleshooting: `ModuleNotFoundError: No module named "xgboost2ww"`
-
-If `pip show xgboost2ww` says installed but `import xgboost2ww` fails in a notebook, your pip target and notebook kernel are different Python environments.
-
-Use this in a notebook cell:
-
-```python
-import sys
-print(sys.executable)
-!{sys.executable} -m pip show xgboost2ww
-```
-
-Then:
-
-1. Install with `%pip install xgboost2ww` (not `!pip`).
-2. Restart the runtime/kernel.
-3. Re-run the notebook from the top.
-
-In Colab, this mismatch is the most common cause of this error.
-
----
-
 ## Google Colab Notebooks
 
 #### Single Good Model
