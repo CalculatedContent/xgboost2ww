@@ -825,7 +825,7 @@ def convert(
     data: Any,
     labels: Any,
     *,
-    W: Literal["W1", "W2", "W7", "W8", "W9", "W10"] = "W7",
+    W: Literal["W1", "W2", "W7", "W8", "W9", "W10"] = "W1",
     nfolds: int = 5,
     t_points: int = 160,
     random_state: int = 0,

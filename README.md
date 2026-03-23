@@ -204,6 +204,12 @@ When α drifts upward or traps appear, it is often a signal of:
 
 
 
+## Matrix defaults and stability
+
+- `convert(...)` now defaults to `W="W1"` (instead of `W="W7"`).
+- `W1` is the recommended non-experimental default.
+- All other `W` variants (`W2`, `W7`, `W8`, `W9`, `W10`) are currently experimental.
+
 ## Matrix definitions at a glance
 
 - **W8**: legacy practical surrogate based on weighted/centered `W7`.
