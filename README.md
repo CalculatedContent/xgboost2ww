@@ -39,7 +39,7 @@ XGBoost2WW gives you a new lens to inspect them.
 
 # xgboost2ww
 
-Convert XGBoost boosting dynamics into WeightWatcher-style operators (W1/W2/W7/W8/W9/W10).
+Convert XGBoost boosting dynamics into WeightWatcher-style operators (W1/W2/W7/W8/W9).
 
 ## Install
 
@@ -208,7 +208,7 @@ When α drifts upward or traps appear, it is often a signal of:
 
 - `convert(...)` now defaults to `W="W1"` (instead of `W="W7"`).
 - `W1` is the recommended non-experimental default.
-- All other `W` variants (`W2`, `W7`, `W8`, `W9`, `W10`) are currently experimental.
+- All other `W` variants (`W2`, `W7`, `W8`, `W9`) are currently experimental.
 
 ## Matrix definitions at a glance
 
@@ -228,29 +228,6 @@ W9 = diag(sqrt(h)) · A · diag(gamma_diag^{-1/2})
 `W9` v1 uses the local-quadratic **L2** regularizer mass (`lambda`) and intentionally
 ignores the non-smooth **L1** (`alpha`) term.
 
-
-## W10 (leaf-linearized operator)
-
-`W10` is a new representation family and **not** another OOF trajectory rescaling. Existing W1/W2/W7/W8/W9 behavior is unchanged.
-
-W10 is built from the final fitted booster using:
-- final-model leaf assignments,
-- Hessian-weighted centering,
-- per-tree contrast projection,
-- per-tree block whitening.
-
-It is intended to isolate inter-tree correlations after removing trivial leaf-occupancy geometry.
-
-```python
-from xgboost2ww import compute_w10, convert
-
-W10 = compute_w10(bst, X, y)
-layer = convert(bst, X, y, W="W10", return_type="torch")
-```
-
-W10 is currently implemented for `binary:logistic` and `reg:squarederror`. Multiclass W10 is deferred.
-
-W10 is the best-motivated matrix for testing the RG / α≈2 hypothesis, but the package reports the measured alpha honestly and does not assume success.
 
 ## Notes / limitations
 
