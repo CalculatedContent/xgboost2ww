@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from xgboost2ww import compute_matrices
+from xgboost2ww import compute_matrices, convert
 
 
 @pytest.mark.parametrize("nfolds,t_points", [(2, 20), (5, 20)])
@@ -83,3 +83,12 @@ def test_compute_matrices_with_training_overrides_runs(toy_binary_data):
         assert np.isfinite(mats.W7).all()
         assert np.isfinite(mats.W8).all()
         assert np.isfinite(mats.W9).all()
+
+
+def test_convert_defaults_to_w1(booster, toy_binary_data):
+    X, y = toy_binary_data
+    W_default = convert(booster, X, y, return_type="numpy")
+    W_w1 = convert(booster, X, y, W="W1", return_type="numpy")
+
+    assert W_default.shape == W_w1.shape
+    assert np.allclose(W_default, W_w1, atol=1e-7, rtol=1e-7)
