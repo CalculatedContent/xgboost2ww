@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xgboost2ww"
-version = "0.1.0"
+version = "0.1.1"
 description = "Compute WeightWatcher-style correlation matrices (W1/W2/W7/W8) for XGBoost via OOF margin increments."
 readme = "README.md"
 requires-python = ">=3.9"
